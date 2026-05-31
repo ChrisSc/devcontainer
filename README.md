@@ -95,31 +95,40 @@ are not host folders — move code in/out with `git` or `docker cp` (below), not
 
 ## Copying files in and out
 
-The volumes aren't host directories, so use `docker cp` to move things across the
-boundary. Syntax: `docker cp <src> <dst>`, where the container side is
-`claude-code:<path>`.
+The volumes aren't host directories, so you copy across the boundary explicitly.
+
+**Preferred (host -> container): tar-pipe, so files arrive owned by `claude`.**
+`docker cp` has no `--chown` and preserves the host's numeric uid/gid (your macOS
+`501`), landing files as an unmapped owner you then have to `chown`. Piping a tar
+stream into `docker exec -u claude` instead extracts as `claude`, so ownership is
+correct in one step -- no `sudo` afterward:
 
 ```bash
-# Host -> container: a single file into the workspace
-docker cp ./config.toml claude-code:/workspace/config.toml
-
-# Host -> container: a folder (example: install a skill into the persistent
-# ~/.claude volume, so it survives rebuilds)
-docker cp ~/dev/my-skill claude-code:/home/claude/.claude/skills/my-skill
-
-# Container -> host: pull a result back out
-docker cp claude-code:/workspace/out.csv ./out.csv
+# Install a skill into the persistent ~/.claude volume, owned by claude
+tar -C ~/dev -cf - my-skill | docker exec -i -u claude claude-code \
+  tar -C /home/claude/.claude/skills -xf -
 ```
 
-`docker cp` preserves the **host** file's numeric owner and mode, which the
-container does not interpret as the `claude` user — so fix both afterward:
+`-C ~/dev` is the folder's parent on the host, `my-skill` the folder to send, and
+`-C /home/claude/.claude/skills` the destination inside the container. macOS tar
+may print harmless `LIBARCHIVE.xattr...provenance` warnings -- the files extract
+fine. The `make cp-skill SRC=~/dev/my-skill` shortcut wraps this exact command.
 
-- **Ownership** (the copied tree lands owned by an unmapped uid, not `claude`):
+**`docker cp` (fine for one-off files; pulling results back out):**
+
+```bash
+docker cp ./config.toml claude-code:/workspace/config.toml   # host  -> container
+docker cp claude-code:/workspace/out.csv ./out.csv           # container -> host
+```
+
+If you do use `docker cp` host -> container, fix the two things it gets wrong:
+
+- **Ownership** -- normalize to `claude` (safe even if already correct):
   ```bash
-  docker exec -u root claude-code chown -R claude:claude /home/claude/.claude/skills/my-skill
+  docker exec -u root claude-code chown -R claude:claude <dest-path>
   ```
-- **Mode is copied verbatim.** A script that wasn't `+x` on the host arrives
-  non-executable (→ `command not found` under `sudo`). `chmod +x` it on the host
+- **Mode is copied verbatim** -- a script that wasn't `+x` on the host arrives
+  non-executable (`command not found` under `sudo`). `chmod +x` it on the host
   before copying, or in the container after. See *Troubleshooting the firewall*.
 
 Skills copied to `~/.claude/skills` persist across rebuilds (they live in the

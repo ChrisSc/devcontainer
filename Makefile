@@ -1,7 +1,7 @@
 # Shortcuts for the Claude sandbox. Compose lives in .devcontainer/.
 COMPOSE := docker compose -f .devcontainer/compose.yaml
 
-.PHONY: up shell rebuild logs stop down nuke firewall doctor
+.PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill
 
 up:        ## Build (if needed) and start the container
 	$(COMPOSE) up -d --build
@@ -30,3 +30,10 @@ firewall:  ## Re-apply the egress firewall (e.g. after editing extra-allowlist.t
 
 doctor:    ## Run claude doctor inside the container
 	docker exec -it claude-code claude doctor
+
+cp-skill:  ## Copy a skill folder into ~/.claude/skills owned by claude: make cp-skill SRC=~/dev/my-skill
+	@test -n "$(SRC)" || { echo "usage: make cp-skill SRC=<path-to-skill-folder>"; exit 1; }
+	@test -d "$(SRC)" || { echo "error: $(SRC) is not a directory"; exit 1; }
+	tar -C "$(dir $(SRC:/=))" -cf - "$(notdir $(SRC:/=))" | \
+	  docker exec -i -u claude claude-code tar -C /home/claude/.claude/skills -xf -
+	@echo "copied $(notdir $(SRC:/=)) -> ~/.claude/skills (owned by claude)"
