@@ -97,6 +97,8 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   `config/extra-allowlist.txt`).
 - `entrypoint.sh` / `seed-claude.sh` — startup orchestration + `~/.claude` seeding.
 - `home/` — baked dotfiles. `seed/CLAUDE.md` — the in-container orientation doc.
+- DB sidecar: `gen-env.sh` (generates the gitignored `.env` secret; `.env.example`
+  is the template), `db-init/` (initdb scripts — pgvector in `template1`).
 
 ## Editing notes
 - These are shell/Docker/JSONC files; the org Python/TS style guides don't apply,

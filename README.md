@@ -77,6 +77,37 @@ git config --global user.email "you@example.com"
 Since `/workspace` is an isolated volume, bring code in by cloning
 (GitHub is allowlisted): `git clone https://github.com/you/repo /workspace/repo`.
 
+### SSH for git (push over `git@github.com`)
+
+`gh auth login` already covers HTTPS git. If you'd rather push over SSH, create a
+container-only key in the persistent `~/.claude` volume, register it with GitHub,
+and wire it into ssh — no ssh-agent needed (the key has no passphrase):
+
+```bash
+mkdir -p ~/.claude/ssh && chmod 700 ~/.claude/ssh
+ssh-keygen -t ed25519 -C "claude-code container" -f ~/.claude/ssh/id_ed25519 -N ""
+
+# register the public key with GitHub (one-time scope grant, then add)
+gh auth refresh -h github.com -s admin:public_key
+gh ssh-key add ~/.claude/ssh/id_ed25519.pub --title "claude-code container"
+
+# point ssh at the key; ~/.ssh is ephemeral so symlink the real config from ~/.claude
+cat > ~/.claude/ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.claude/ssh/id_ed25519
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.claude/ssh/config
+mkdir -p ~/.ssh && ln -sf ~/.claude/ssh/config ~/.ssh/config
+
+ssh -T git@github.com   # expect: "Hi <user>! You've successfully authenticated…"
+```
+
+The key and config live in `~/.claude/ssh/` (persists across rebuilds); only the
+`~/.ssh/config` symlink is ephemeral and is re-created by the `ln` above. The
+`gh auth refresh` step uses GitHub's device flow — it prints a code; open the URL
+on your **host** browser to approve (the firewall allows `github.com`).
+
 ## What persists
 
 Only these **named volumes** survive a rebuild. Everything else in the container
@@ -214,7 +245,8 @@ to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IP
 .devcontainer/
   devcontainer.json    compose.yaml    Dockerfile
   init-firewall.sh     entrypoint.sh   seed-claude.sh    install-tools.sh
-  config/extra-allowlist.txt
+  gen-env.sh           db-init/10-pgvector.sql   # DB: secret gen + pgvector init
+  config/extra-allowlist.txt            .env.example   # .env is generated, gitignored
   home/.zshrc          home/.config/{starship.toml,zsh/aliases.zsh}
   seed/CLAUDE.md       # -> ~/.claude/CLAUDE.md on first start
 ```

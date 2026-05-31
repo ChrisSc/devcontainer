@@ -103,9 +103,27 @@ No host credentials are mounted. Authenticate once inside; it persists in the
 `~/.claude` volume:
 - `gh auth login` (config in `$GH_CONFIG_DIR=~/.claude/gh`).
 - `git config --global user.name/user.email` (`$GIT_CONFIG_GLOBAL=~/.claude/gitconfig`).
-- SSH: keys live in `~/.claude/ssh/`. The key is passphrase-free, so no ssh-agent
-  is needed — point git at it with `core.sshCommand` or an `~/.ssh/config` that
-  sets `IdentityFile ~/.claude/ssh/id_ed25519`.
+- SSH for git: keep the key in the persistent `~/.claude/ssh/` volume and wire it
+  via `~/.ssh/config` (a symlink — `~/.ssh` itself is NOT persistent). Make a
+  passphrase-free key (so no ssh-agent is needed), register it with GitHub, and
+  point ssh at it:
+  ```sh
+  mkdir -p ~/.claude/ssh && chmod 700 ~/.claude/ssh
+  ssh-keygen -t ed25519 -C "claude-code container" -f ~/.claude/ssh/id_ed25519 -N ""
+  gh auth refresh -h github.com -s admin:public_key   # one-time: grant key scope
+  gh ssh-key add ~/.claude/ssh/id_ed25519.pub --title "claude-code container"
+  cat > ~/.claude/ssh/config <<'EOF'
+  Host github.com
+    IdentityFile ~/.claude/ssh/id_ed25519
+    IdentitiesOnly yes
+  EOF
+  chmod 600 ~/.claude/ssh/config
+  mkdir -p ~/.ssh && ln -sf ~/.claude/ssh/config ~/.ssh/config
+  ssh -T git@github.com   # expect: "Hi <user>! You've successfully authenticated"
+  ```
+  Only the `~/.ssh/config` symlink is ephemeral; the key + config in `~/.claude`
+  survive rebuilds. The `gh auth refresh` device flow prints a code — open the URL
+  on your host to approve (firewall allows github.com).
 
 ## 8. Updating Claude Code
 Installed via the native installer; auto-updates at container start (from the
