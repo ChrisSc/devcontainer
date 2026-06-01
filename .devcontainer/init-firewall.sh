@@ -103,6 +103,48 @@ add_domain() {
     log "added ${added} IP(s) for ${domain}"
 }
 
+# Load AWS's published CIDR ranges (ip-ranges.json) into the ipset. This is the
+# AWS analog of GitHub's /meta feed: apex A-record pinning (add_domain) can NOT
+# cover AWS, whose endpoints are wildcard, per-region, and CloudFront-fronted
+# (oidc/portal.sso/sts/s3.<region>.amazonaws.com, <id>.awsapps.com, ...). A bare
+# `amazonaws.com` has no useful A record; the few that resolve are CloudFront and
+# go stale. So we allow the published prefixes instead. NON-FATAL by design.
+#
+# Hardcoded to service "AMAZON" — the superset that subsumes S3/EC2/CLOUDFRONT/
+# the SSO+STS endpoints needed for `aws sso login` + CLI. Optional region filter
+# (space/comma-separated) shrinks the set massively; GLOBAL prefixes (CloudFront,
+# awsapps.com assets) are ALWAYS kept so narrowing by region can't break login.
+add_aws_ranges() {
+    local region_filter="${1:-}" json="" count=0 cidr reg_json='[]' jq_prog
+    log "fetching AWS IP ranges (service=AMAZON, regions=${region_filter:-all})"
+    for attempt in 1 2 3; do
+        json="$(curl -fsSL --connect-timeout 5 \
+            https://ip-ranges.amazonaws.com/ip-ranges.json || true)"
+        [ -n "$json" ] && echo "$json" | jq -e '.prefixes' >/dev/null 2>&1 && break
+        warn "AWS ip-ranges fetch attempt ${attempt} failed; retrying"
+        json=""
+    done
+    if [ -z "$json" ]; then
+        warn "AWS ip-ranges unavailable — AWS access may be limited"
+        return 0
+    fi
+    if [ -n "$region_filter" ]; then
+        reg_json="$(printf '%s' "$region_filter" | tr ', ' '\n\n' \
+            | grep -v '^$' | jq -R . | jq -s .)"
+        jq_prog='.prefixes[] | select(.service=="AMAZON")
+                 | select((.region=="GLOBAL") or ($reg|index(.region)))
+                 | .ip_prefix'
+    else
+        jq_prog='.prefixes[] | select(.service=="AMAZON") | .ip_prefix'
+    fi
+    while read -r cidr; do
+        [[ "$cidr" =~ ^[0-9.]+/[0-9]{1,2}$ ]] || continue
+        ipset add allowed-domains "$cidr" 2>/dev/null && count=$((count + 1))
+    done < <(echo "$json" \
+        | jq -r --argjson reg "$reg_json" "$jq_prog" | aggregate -q || true)
+    log "added ${count} AWS CIDR(s)"
+}
+
 # ---------------------------------------------------------------------------
 # 1. Preserve Docker's internal DNS NAT rules across the flush
 # ---------------------------------------------------------------------------
@@ -170,13 +212,24 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
     add_domain "$domain"
 done
 
-# Host-editable extra allowlist (one hostname per line, '#' comments).
+# Host-editable extra allowlist (one hostname per line, '#' comments). A line of
+# the form `@aws-ip-ranges [region ...]` loads AWS's published CIDRs instead of
+# pinning apex IPs (see add_aws_ranges) — needed for `aws sso login` + the CLI.
 if [ -f "$EXTRA_ALLOWLIST" ]; then
     log "processing extra allowlist ${EXTRA_ALLOWLIST}"
-    while read -r line; do
-        line="${line%%#*}"; line="$(echo "$line" | tr -d '[:space:]')"
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -z "$line" ] && continue
-        add_domain "$line"
+        case "$line" in
+            @aws*)
+                regions="${line#@aws-ip-ranges}"; regions="${regions#@aws}"
+                add_aws_ranges "$regions"
+                ;;
+            *)
+                add_domain "$(echo "$line" | tr -d '[:space:]')"
+                ;;
+        esac
     done < "$EXTRA_ALLOWLIST"
 fi
 

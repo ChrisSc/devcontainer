@@ -44,6 +44,8 @@
     }
   },
   // Idempotent safety net for the VS Code path (the ENTRYPOINT already did this).
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && claude update || true",
+  // FIREWALL_MODE is passed explicitly — sudoers `env_reset` drops the ambient
+  // env, so without this the firewall always runs in its :-strict default.
+  "postStartCommand": "sudo FIREWALL_MODE=${FIREWALL_MODE:-strict} /usr/local/bin/init-firewall.sh && claude update || true",
   "waitFor": "postStartCommand"
 }

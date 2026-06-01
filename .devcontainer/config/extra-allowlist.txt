@@ -20,3 +20,12 @@
 #
 # Note: github.com, api.github.com, and the release-asset hosts are ALWAYS
 # allowed by init-firewall.sh — you do not need to list them here.
+#
+# --- AWS ---
+# AWS endpoints are wildcard, per-region, and CloudFront-fronted, so a hostname
+# line here can't reach them (a bare `amazonaws.com` has no useful A record). Use
+# the directive below: it loads AWS's published CIDR feed (ip-ranges.json, the
+# AWS analog of GitHub's /meta) — covering `aws sso login` + the CLI (oidc /
+# portal.sso / sts / s3 / awsapps.com). Optionally narrow by region to shrink the
+# ipset, e.g. `@aws-ip-ranges us-east-1 eu-west-1` (GLOBAL/CloudFront always kept).
+@aws-ip-ranges

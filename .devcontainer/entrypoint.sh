@@ -15,7 +15,11 @@ if ! sudo -n true 2>/dev/null; then
     exit 1
 fi
 for attempt in 1 2 3; do
-    if sudo /usr/local/bin/init-firewall.sh; then
+    # Pass FIREWALL_MODE explicitly: sudoers `env_reset` strips the ambient env,
+    # but an explicit `sudo VAR=val` assignment survives it. Without this the
+    # script always falls back to its `:-strict` default and FIREWALL_MODE from
+    # compose has no effect.
+    if sudo FIREWALL_MODE="${FIREWALL_MODE:-strict}" /usr/local/bin/init-firewall.sh; then
         break
     fi
     echo "[entrypoint] WARN: firewall attempt ${attempt} failed; retrying" >&2

@@ -60,6 +60,33 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   (`objects.githubusercontent.com`, `codeload.github.com`) are pinned explicitly
   in `init-firewall.sh` — they're NOT in meta. Don't delete them as "redundant";
   doing so breaks `gh auth refresh` (`no route to host`) and `uv python install`.
+- **AWS egress uses the published CIDR feed, not apex hostnames.** AWS endpoints
+  are wildcard / per-region / CloudFront-fronted, so an `extra-allowlist.txt`
+  *hostname* line can't reach them (a bare `amazonaws.com` has no useful A record;
+  the few that resolve are CloudFront and go stale). Instead, an `@aws-ip-ranges`
+  directive in `extra-allowlist.txt` makes `init-firewall.sh` fetch
+  `ip-ranges.amazonaws.com/ip-ranges.json` (the AWS analog of GitHub's `/meta`)
+  and load the `AMAZON` service prefixes (~1750 CIDRs) — covering `aws sso login`
+  + the CLI (oidc/portal.sso/sts/s3/awsapps). Optional region args narrow the set
+  (`@aws-ip-ranges us-east-1`); `GLOBAL`/CloudFront prefixes are always kept so
+  narrowing can't break login. Don't re-add apex AWS hostnames — they're noise.
+- **Editing a single-file bind mount (`extra-allowlist.txt`) needs a container
+  *restart*, not just a firewall re-run.** The allowlist is bind-mounted as a lone
+  file; on Docker Desktop macOS the mount is inode-pinned, so when an editor
+  replaces the file (write-temp + rename → new inode) the container keeps serving
+  the STALE inode. `docker exec … init-firewall.sh` then re-reads the old content.
+  `docker restart claude-code` re-binds the mount to the current host file (and
+  re-runs the entrypoint firewall). Symptom: host edits to the allowlist appear to
+  have no effect even after re-running the firewall. (`make rebuild` also works —
+  it bakes the file via the Dockerfile `COPY`.)
+- **`FIREWALL_MODE` must be passed explicitly on the `sudo` line.** sudoers has
+  `env_reset` and no `env_keep` for it, so a bare `sudo init-firewall.sh` would
+  never see `FIREWALL_MODE` from compose and always run the script's `:-strict`
+  default. Both call sites therefore use `sudo FIREWALL_MODE="${FIREWALL_MODE:-strict}"
+  /usr/local/bin/init-firewall.sh` (an explicit `VAR=val` assignment survives
+  `env_reset`) — `entrypoint.sh` and `devcontainer.json`'s `postStartCommand`.
+  Don't drop the assignment back to a bare `sudo …`; that silently re-breaks the
+  `permissive`/`dev` switch.
 - **`docker cp`-ing a script into the running container drops its exec bit**
   (`sudo: …: command not found`). Source scripts are kept `+x` in git, but
   `docker cp` applies the host file mode and the Dockerfile's `chmod +x` only
