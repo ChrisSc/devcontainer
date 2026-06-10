@@ -155,9 +155,31 @@ A shared Postgres server with the `vector` extension runs as a sidecar
   `make db-reset` destroy it). Back up with `make db-dump` -> ./db-backups (host).
 - If `db` won't resolve/connect, the sidecar likely isn't running: `make db-up`.
 
-## 10. Pointers
+## 10. Scheduled agents (cron)
+Run Claude agents on a schedule. `cron` is installed and its daemon starts at boot.
+- **Source of truth:** `~/.claude/cron/crontab` (persists in the `~/.claude`
+  volume). It is re-installed into the live cron spool at every boot.
+- **Add/edit jobs:** `crontab-edit` (opens the file in `$EDITOR`, then applies), or
+  edit `~/.claude/cron/crontab` and run `crontab-reload`. Inspect the live spool
+  with `crontab -l`.
+- **Don't use `crontab -e`** — its edits go to the ephemeral spool only and are
+  **lost on rebuild** (a header in the file reminds you).
+- **Environment is handled for you:** cron strips the environment, so each job runs
+  via `bash` sourcing `~/.claude/cron/cron.env` (regenerated each boot with
+  `CLAUDE_CONFIG_DIR`, `PATH`, auth paths, ...). Auth comes from the persistent
+  `~/.claude`, so `claude -p "..."` runs non-interactively with your login.
+- **Logs:** cron's own daemon output isn't captured (no syslog) — redirect each job
+  to `~/.claude/cron/logs/`, e.g.
+  `0 9 * * * cd /workspace && claude -p "..." >> ~/.claude/cron/logs/daily.log 2>&1`.
+- **Egress:** a job hitting a host beyond the default allowlist needs it added to
+  `extra-allowlist.txt` (see §2), then re-run the firewall.
+- **Liveness:** `pgrep -x cron` (one process expected).
+
+## 11. Pointers
 - Firewall: `/usr/local/bin/init-firewall.sh`; extras
   `/etc/claude-firewall/extra-allowlist.txt`.
+- Cron: `~/.claude/cron/crontab` (jobs), `~/.claude/cron/cron.env` (job env),
+  `~/.claude/cron/logs/` (output); `crontab-edit` / `crontab-reload`.
 - Shell: `~/.zshrc`, aliases `~/.config/zsh/aliases.zsh`, prompt
   `~/.config/starship.toml`.
 - Live inventory: `~/.claude/ENVIRONMENT.md` (regenerated each boot).

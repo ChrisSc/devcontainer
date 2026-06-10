@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#
+# crontab-edit — edit the PERSISTENT crontab (~/.claude/cron/crontab) in $EDITOR
+# and apply it. Use this instead of `crontab -e`, whose edits go to the ephemeral
+# spool only and are lost on rebuild.
+set -euo pipefail
+
+CRONTAB_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/cron/crontab"
+
+# First run before boot has seeded anything: scaffold via init-cron.sh.
+[ -f "$CRONTAB_FILE" ] || /usr/local/bin/init-cron.sh
+
+"${EDITOR:-vim}" "$CRONTAB_FILE"
+exec /usr/local/bin/crontab-reload

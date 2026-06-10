@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#
+# crontab-reload — re-install ~/.claude/cron/crontab into the live cron spool and
+# regenerate the job environment, WITHOUT a container restart. Run this after
+# editing ~/.claude/cron/crontab. (Boot does this automatically via init-cron.sh.)
+#
+# This is the right way to apply changes: bare `crontab -e` edits the ephemeral
+# spool only and is lost on the next rebuild.
+exec /usr/local/bin/init-cron.sh "$@"

@@ -4,6 +4,7 @@ COMPOSEDB := $(COMPOSE) --profile db
 ENV_FILE := .devcontainer/.env
 
 .PHONY: up shell rebuild logs stop down nuke firewall doctor cp-skill \
+        cron-reload cron-log \
         env allowlist db-up db-down db-psql db-logs db-create db-dump db-reset
 
 up: env allowlist   ## Build (if needed) and start the container
@@ -33,6 +34,12 @@ firewall:  ## Re-apply the egress firewall (e.g. after editing extra-allowlist.t
 
 doctor:    ## Run claude doctor inside the container
 	docker exec -it claude-code claude doctor
+
+cron-reload: ## Re-install the persisted crontab into cron (after editing ~/.claude/cron/crontab)
+	docker exec claude-code crontab-reload
+
+cron-log:  ## Follow scheduled-agent job logs (~/.claude/cron/logs)
+	docker exec -it claude-code bash -c 'tail -n 100 -F ~/.claude/cron/logs/* 2>/dev/null || echo "no cron logs yet (~/.claude/cron/logs is empty)"'
 
 cp-skill:  ## Copy a skill folder into ~/.claude/skills owned by claude: make cp-skill SRC=~/dev/my-skill
 	@test -n "$(SRC)" || { echo "usage: make cp-skill SRC=<path-to-skill-folder>"; exit 1; }
