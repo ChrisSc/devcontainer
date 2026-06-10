@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-06-09
+
+### Added
+
+- Scheduled agents via **cron**: the `cron` daemon is installed and started at
+  boot, and the crontab is a real file in the persistent `~/.claude` volume
+  (`~/.claude/cron/crontab`) re-installed into the live spool every boot by
+  `init-cron.sh`. Symlinking the spool into a volume can't work — Debian's Vixie
+  cron silently ignores symlinked / wrong-perm crontabs — so the file is the
+  source of truth and survives rebuilds. Jobs run with a reconstructed
+  environment (`cron.env` regenerated each boot + `SHELL=/bin/bash` + `BASH_ENV`),
+  so `claude -p` runs non-interactively with the persisted `~/.claude` auth.
+  Helpers: `crontab-edit` / `crontab-reload`; `make cron-reload` / `make cron-log`.
+
+### Fixed
+
+- `/usr/local/share/npm-global/bin` appeared twice in `PATH` (section 4 prepended
+  it for the build, then the final `ENV` prepended it again). The runtime `PATH`
+  is now spelled out in full to match `entrypoint.sh`, so it's single-entry and no
+  longer leaks the duplicate into snapshots of the live env (e.g. `cron.env`).
+
+### Documentation
+
+- New "Scheduled agents (cron)" sections in `README.md` and the in-container
+  `seed/CLAUDE.md`; `CLAUDE.md` documents the cron invariants (file-not-symlink
+  source of truth, the stripped-env reconstruction via `cron.env` + `BASH_ENV`,
+  and the `pgrep`-guarded daemon start).
+
 ## [0.1.4] - 2026-06-03
 
 ### Changed
@@ -104,7 +132,8 @@ self-contained home for Claude Code, derived from Anthropic's official
 - MIT license for this repo's original work, `SECURITY.md`, and upstream
   attribution to Anthropic's devcontainer.
 
-[Unreleased]: https://github.com/ChrisSc/devcontainer/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/ChrisSc/devcontainer/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/ChrisSc/devcontainer/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/ChrisSc/devcontainer/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/ChrisSc/devcontainer/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/ChrisSc/devcontainer/compare/v0.1.1...v0.1.2
