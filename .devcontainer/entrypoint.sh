@@ -33,6 +33,10 @@ done
 echo "[entrypoint] checking for Claude Code updates"
 claude update || echo "[entrypoint] WARN: claude update failed (non-fatal)" >&2
 
-# 4. Hand off to the container command (default: sleep infinity).
+# 4. Install the persisted crontab + start cron (scheduled Claude agents). After
+#    the firewall so jobs that fire have egress; non-fatal so cron can't brick boot.
+/usr/local/bin/init-cron.sh || echo "[entrypoint] WARN: cron init failed (non-fatal)" >&2
+
+# 5. Hand off to the container command (default: sleep infinity).
 echo "[entrypoint] ready — claude $(claude --version 2>/dev/null || echo '?'); attach with: docker exec -it claude-code zsh -l"
 exec "$@"

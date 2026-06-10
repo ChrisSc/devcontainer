@@ -29,10 +29,12 @@ Compose project (group) = `claude`; container = `claude-code`.
 
 ## How startup works (the non-obvious part)
 `ENTRYPOINT` = `entrypoint.sh`, which runs **in order**: (1) `sudo init-firewall.sh`,
-(2) `seed-claude.sh`, (3) `claude update`, then execs the compose `command`
-(`sleep infinity`). Ordering is load-bearing — the firewall must be up before the
-auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewall
-+ update via `devcontainer.json` `postStartCommand` as an idempotent safety net.
+(2) `seed-claude.sh`, (3) `claude update`, (4) `init-cron.sh` (install persisted
+crontab + start cron), then execs the compose `command` (`sleep infinity`).
+Ordering is load-bearing — the firewall must be up before the auto-update can reach
+`downloads.claude.ai`, and before cron jobs that need egress fire. The VS Code path
+re-runs firewall + update + cron via `devcontainer.json` `postStartCommand` as an
+idempotent safety net.
 
 ## Invariants — break these and the container breaks
 - **User is `claude`** (uid 1000, renamed from the base image's `node`). The name
@@ -159,6 +161,23 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
   pg18 image refuses to init at the volume mount root) and `PGHOST: ""` (the
   shared `.env` injects `PGHOST=db` client vars into the *server* container too,
   which would point its healthcheck at itself over TCP).
+- **Crontab source of truth is `~/.claude/cron/crontab`, re-installed into the
+  spool at boot — NOT symlinked.** Per-user crontabs live in
+  `/var/spool/cron/crontabs` (container layer, wiped on rebuild), and Debian's
+  Vixie cron silently ignores symlinked / wrong-perm crontab files — so the
+  ssh-style directory-symlink trick does NOT work here. `init-cron.sh` instead
+  keeps the crontab as a real file in the `~/.claude` volume and runs
+  `crontab <file>` at boot (a regular file, correct perms). Don't "simplify" this
+  to a symlink into the volume. Edits via bare `crontab -e` hit the ephemeral spool
+  and are lost on rebuild — `crontab-edit`/`crontab-reload` round-trip through the
+  persisted file.
+- **Cron jobs run with a stripped environment**, so the crontab sets
+  `SHELL=/bin/bash` + `BASH_ENV=~/.claude/cron/cron.env`; `init-cron.sh`
+  regenerates `cron.env` each boot from the live `claude` env (`CLAUDE_CONFIG_DIR`,
+  `PATH`, auth paths, ...). Without that, a `claude` job sees neither its config dir
+  nor `~/.local/bin` on PATH. The cron daemon is started root-via-`sudo` with a
+  `pgrep -x cron` guard so entrypoint + `postStartCommand` can't double-start it.
+  No new volume — cron state lives under the existing `~/.claude` (`claude-config`).
 
 ## File map
 - `Dockerfile` — base + all build-time installs; `install-tools.sh` does the
@@ -168,6 +187,9 @@ auto-update can reach `downloads.claude.ai`. The VS Code path re-runs the firewa
 - `init-firewall.sh` — layered default-deny egress (`FIREWALL_MODE`,
   `config/extra-allowlist.txt`).
 - `entrypoint.sh` / `seed-claude.sh` — startup orchestration + `~/.claude` seeding.
+- `init-cron.sh` — install the persisted crontab + start cron at boot;
+  `crontab-edit` / `crontab-reload` are the user-facing helpers (don't shadow the
+  real `crontab`). Crontab template: `seed/crontab`.
 - `home/` — baked dotfiles. `seed/CLAUDE.md` — the in-container orientation doc.
 - DB sidecar: `gen-env.sh` (generates the gitignored `.env` secret; `.env.example`
   is the template), `db-init/` (initdb scripts — pgvector in `template1`).

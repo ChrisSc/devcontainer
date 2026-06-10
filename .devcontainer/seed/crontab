@@ -1,0 +1,27 @@
+# Claude sandbox crontab — SOURCE OF TRUTH: ~/.claude/cron/crontab
+#
+# This file is installed into cron at every container boot (init-cron.sh) and
+# persists in the ~/.claude volume across rebuilds. Edits made with `crontab -e`
+# go to the ephemeral spool ONLY and are LOST on rebuild — edit THIS file instead
+# (run `crontab-edit`, or edit it and run `crontab-reload` to apply).
+#
+# Environment: cron strips the environment, so each job runs as `bash -c` and bash
+# sources BASH_ENV (cron.env, regenerated each boot with CLAUDE_CONFIG_DIR, PATH,
+# auth paths, ...). Claude auth is read from the persistent ~/.claude, so
+# `claude -p "..."` runs non-interactively with your existing login.
+#
+# Logs: cron's own daemon output is not captured (no syslog) — redirect each job's
+# output to ~/.claude/cron/logs/ as in the example below.
+#
+# Egress: a job reaching a host beyond the firewall's default allowlist needs that
+# host in /etc/claude-firewall/extra-allowlist.txt (see CLAUDE.md "network" section).
+#
+# Format:  minute  hour  day-of-month  month  day-of-week   command
+SHELL=/bin/bash
+BASH_ENV=/home/claude/.claude/cron/cron.env
+PATH=/home/claude/.local/bin:/usr/local/share/npm-global/bin:/home/claude/.local/share/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# --- your jobs below (uncomment / add) ---
+# Example — every day at 09:00, run an agent and append its output to a log:
+# 0 9 * * * cd /workspace && claude -p "summarize yesterday's commits" >> /home/claude/.claude/cron/logs/daily.log 2>&1

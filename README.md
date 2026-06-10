@@ -24,6 +24,8 @@ derived from the official [`anthropics/claude-code/.devcontainer`](https://githu
   host-editable extra-allowlist, and a `FIREWALL_MODE=permissive` escape hatch.
 - **Persistence:** named volumes for workspace, Claude config/auth, shell
   history, and the pnpm store.
+- **Scheduling:** a persistent crontab + cron daemon for running Claude agents on
+  a schedule — jobs live in the `~/.claude` volume and survive rebuilds.
 
 Compose project (container group): **`claude`** · container: **`claude-code`**.
 
@@ -58,7 +60,7 @@ or run `sed -i 's/\r$//'` on it.
 ## Run it (standalone)
 
 ```bash
-# build + start (firewall, CLAUDE.md seed, and claude auto-update run on start)
+# build + start (firewall, CLAUDE.md seed, claude auto-update, and cron run on start)
 docker compose -f .devcontainer/compose.yaml up -d --build
 
 # drop into an interactive login shell as `claude`
@@ -153,7 +155,7 @@ survives `stop`/`start` but is **wiped by `make rebuild`** (and `make down`/`up`
 | Path | Volume | Holds |
 |---|---|---|
 | `/workspace` | `claude-workspace` | your code — put all durable work here |
-| `~/.claude` | `claude-config` | Claude state/auth, added skills, `gh`/`git`/`ssh` creds |
+| `~/.claude` | `claude-config` | Claude state/auth, added skills, `gh`/`git`/`ssh` creds, cron jobs |
 | `/commandhistory` | `claude-bashhistory` | shell history |
 | `~/.local/share/pnpm` | `claude-pnpm-store` | pnpm content store |
 
@@ -231,6 +233,42 @@ make db-down                # stop it (data volume preserved)
 - **Persistence:** data lives in the `claude-pgdata` volume (survives rebuilds;
   `make nuke`/`make db-reset` destroy it).
 
+## Scheduled agents (cron)
+
+Run Claude agents on a schedule. `cron` is installed and its daemon starts at
+boot. The crontab is a **real file in the persistent `~/.claude` volume**
+(`~/.claude/cron/crontab`) that's re-installed into the live cron spool on every
+boot — so your jobs survive rebuilds.
+
+```bash
+make shell
+crontab-edit        # edit ~/.claude/cron/crontab in $EDITOR, then auto-apply
+crontab -l          # inspect the live spool
+make cron-reload    # re-apply after editing the file (run from the host)
+make cron-log       # follow job output in ~/.claude/cron/logs
+```
+
+A job that runs an agent every morning, appending its output to a log:
+
+```cron
+0 9 * * * cd /workspace && claude -p "summarize yesterday's commits" >> ~/.claude/cron/logs/daily.log 2>&1
+```
+
+- **Edit the file, not `crontab -e`.** Bare `crontab -e` writes to the ephemeral
+  spool and is **lost on rebuild**; `crontab-edit` / `crontab-reload` round-trip
+  through the persisted `~/.claude/cron/crontab` (a header in the file reminds you).
+- **The environment is handled for you.** cron strips the environment, so each job
+  runs via `bash` sourcing `~/.claude/cron/cron.env` (regenerated each boot with
+  `CLAUDE_CONFIG_DIR`, `PATH`, auth paths, …). Claude auth comes from the persistent
+  `~/.claude`, so `claude -p "…"` runs non-interactively with your existing login.
+- **Logs:** cron's own daemon output isn't captured (no syslog) — redirect each job
+  to `~/.claude/cron/logs/` as above, then tail with `make cron-log`.
+- **Egress:** a job reaching a host beyond the default allowlist needs that host in
+  `extra-allowlist.txt` (see [Network posture](#network-posture)), then `make firewall`.
+- **Why a file and not a symlink:** Linux's cron refuses symlinked / wrong-permission
+  crontabs, so the spool can't just point into a volume — the file is re-installed at
+  boot instead. Jobs only run while the container is up.
+
 ## Network posture
 
 The firewall is **default-deny outbound**. The host-editable allowlist lives at
@@ -294,10 +332,11 @@ to an IP not captured at boot. Re-run `make firewall` to refresh the resolved IP
 .devcontainer/
   devcontainer.json    compose.yaml    Dockerfile
   init-firewall.sh     entrypoint.sh   seed-claude.sh    install-tools.sh
+  init-cron.sh         crontab-reload  crontab-edit      # scheduled agents (cron)
   gen-env.sh           gen-allowlist.sh   db-init/10-pgvector.sql
   config/extra-allowlist.txt.example    .env.example   # real files generated, gitignored
   home/.zshrc          home/.config/{starship.toml,zsh/aliases.zsh}
-  seed/CLAUDE.md       # -> ~/.claude/CLAUDE.md on first start
+  seed/CLAUDE.md       seed/crontab    # seeded into ~/.claude/ on first start
 ```
 
 See `.devcontainer/seed/CLAUDE.md` for the in-container orientation doc.

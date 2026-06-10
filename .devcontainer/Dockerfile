@@ -37,7 +37,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         # core
-        git gh less procps sudo zsh man-db unzip wget gnupg2 \
+        git gh less procps sudo zsh man-db unzip wget gnupg2 cron \
         build-essential pkg-config python3 tzdata \
         # firewall
         iptables ipset iproute2 dnsutils aggregate \
@@ -140,7 +140,9 @@ RUN set -eux; \
 COPY --chown=claude:claude home/.zshrc /home/claude/.zshrc
 COPY --chown=claude:claude home/.config/ /home/claude/.config/
 COPY seed/CLAUDE.md /usr/local/share/claude-seed/CLAUDE.md
-COPY init-firewall.sh entrypoint.sh seed-claude.sh /usr/local/bin/
+COPY seed/crontab /usr/local/share/claude-seed/crontab
+COPY init-firewall.sh entrypoint.sh seed-claude.sh init-cron.sh \
+     crontab-reload crontab-edit /usr/local/bin/
 COPY config/extra-allowlist.txt /etc/claude-firewall/extra-allowlist.txt
 # Normalize line endings + set exec bits. The CRLF strip is load-bearing for
 # Windows/WSL hosts: if the repo is checked out with CRLF, scripts otherwise die
@@ -151,13 +153,20 @@ RUN set -eux; \
         /usr/local/bin/init-firewall.sh \
         /usr/local/bin/entrypoint.sh \
         /usr/local/bin/seed-claude.sh \
+        /usr/local/bin/init-cron.sh \
+        /usr/local/bin/crontab-reload \
+        /usr/local/bin/crontab-edit \
         /etc/claude-firewall/extra-allowlist.txt \
         /home/claude/.zshrc \
-        /usr/local/share/claude-seed/CLAUDE.md; \
+        /usr/local/share/claude-seed/CLAUDE.md \
+        /usr/local/share/claude-seed/crontab; \
     find /home/claude/.config -type f -exec sed -i 's/\r$//' {} +; \
     chmod +x /usr/local/bin/init-firewall.sh \
              /usr/local/bin/entrypoint.sh \
-             /usr/local/bin/seed-claude.sh
+             /usr/local/bin/seed-claude.sh \
+             /usr/local/bin/init-cron.sh \
+             /usr/local/bin/crontab-reload \
+             /usr/local/bin/crontab-edit
 
 # ---------------------------------------------------------------------------
 # 7. Per-user runtime: Python (uv), Claude Code (native installer + auto-update)
@@ -174,8 +183,15 @@ ENV HOME=/home/claude \
     TEALDEER_CACHE_DIR=/usr/local/share/tealdeer \
     SHELL=/usr/bin/zsh \
     EDITOR=vim \
-    VISUAL=vim \
-    PATH=/home/claude/.local/bin:/usr/local/share/npm-global/bin:/home/claude/.local/share/pnpm:$PATH
+    VISUAL=vim
+
+# Final runtime PATH, written out in full rather than prepending to $PATH. Section 4
+# already ran `PATH=/usr/local/share/npm-global/bin:$PATH` for the build, so
+# prepending npm-global again here listed it TWICE. Harmless for resolution, but the
+# dup leaked into anything that snapshots the live env (e.g. cron.env). This explicit
+# value matches entrypoint.sh's normalized PATH, so the baked env and the
+# runtime-normalized env agree (and stay single-entry).
+ENV PATH=/home/claude/.local/bin:/usr/local/share/npm-global/bin:/home/claude/.local/share/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # uv (Astral) + a managed CPython 3.14 + ruff. `--default` adds generic `python`/
 # `python3` shims to ~/.local/bin (first on PATH) so the bare commands resolve to
